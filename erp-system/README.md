@@ -2,6 +2,14 @@
 
 A comprehensive, enterprise-level Enterprise Resource Planning (ERP) system built with modern JavaScript technologies. This system provides complete business management capabilities including Employee Management, Attendance Tracking, Financial Management, Inventory Control, Project Management, and more.
 
+## 🚀 Quick Deploy to Vercel
+
+**Deploy now in minutes!** See [QUICK_DEPLOY.md](./QUICK_DEPLOY.md) for one-click deployment instructions.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/YOUR_REPO)
+
+---
+
 ## 🏗️ Architecture Overview
 
 ### Technology Stack
