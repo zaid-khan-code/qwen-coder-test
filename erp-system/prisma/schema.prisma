@@ -1,0 +1,939 @@
+// This is the Prisma schema for the Enterprise ERP System
+// It includes all major modules: Employee, Attendance, Finance, Inventory, Projects, Tasks, etc.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTHENTICATION & USER MANAGEMENT
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  phone         String?
+  avatar        String?
+  role          Role      @default(EMPLOYEE)
+  status        Status    @default(ACTIVE)
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+  employeeId    String?   @unique
+  employee      Employee? @relation(fields: [employeeId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLogin     DateTime?
+  
+  // Relations
+  attendanceRecords AttendanceRecord[]
+  tasksAssigned       Task[] @relation("TaskAssignee")
+  tasksCreated        Task[] @relation("TaskCreator")
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  approvals           Approval[]
+  
+  @@index([email])
+  @@index([role])
+  @@index([status])
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  HR
+  FINANCE
+  INVENTORY_MANAGER
+  PROJECT_MANAGER
+  EMPLOYEE
+}
+
+enum Status {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+// ============================================
+// DEPARTMENT & ORGANIZATION
+// ============================================
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  description String?
+  parentId    String?
+  parent      Department? @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children    Department[] @relation("DepartmentHierarchy")
+  managerId   String?
+  budget      Decimal  @default(0) @db.Decimal(15, 2)
+  status      Status   @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  employees Employee[]
+  users     User[]
+  projects  Project[]
+  
+  @@index([code])
+  @@index([parentId])
+}
+
+model Designation {
+  id          String   @id @default(cuid())
+  title       String
+  code        String   @unique
+  level       Int      @default(1)
+  minSalary   Decimal  @db.Decimal(15, 2)
+  maxSalary   Decimal  @db.Decimal(15, 2)
+  description String?
+  permissions Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  employees Employee[]
+  
+  @@index([code])
+}
+
+// ============================================
+// EMPLOYEE MODULE
+// ============================================
+
+model Employee {
+  id              String   @id @default(cuid())
+  employeeCode    String   @unique
+  userId          String?  @unique
+  user            User?    @relation(fields: [userId], references: [id])
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  designationId   String?
+  designation     Designation? @relation(fields: [designationId], references: [id])
+  employmentType  EmploymentType @default(FULL_TIME)
+  joinDate        DateTime
+  endDate         DateTime?
+  status          Status   @default(ACTIVE)
+  
+  // Personal Information
+  dateOfBirth     DateTime?
+  gender          Gender?
+  bloodGroup      String?
+  nationality     String?
+  maritalStatus   MaritalStatus?
+  
+  // Contact Information
+  email           String
+  phone           String
+  emergencyPhone  String?
+  address         Json?
+  
+  // Documents
+  resumeUrl       String?
+  photoUrl        String?
+  documents       Json?
+  
+  // Bank Details
+  bankName        String?
+  accountNumber   String?
+  routingNumber   String?
+  
+  // Salary
+  baseSalary      Decimal  @db.Decimal(15, 2)
+  allowances      Json?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  attendanceRecords AttendanceRecord[]
+  leaves            Leave[]
+  payrolls          Payroll[]
+  performanceReviews PerformanceReview[]
+  
+  @@index([employeeCode])
+  @@index([departmentId])
+  @@index([status])
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  FREELANCE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+// ============================================
+// ATTENDANCE MODULE
+// ============================================
+
+model AttendanceRecord {
+  id            String   @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  date          DateTime @db.Date
+  checkIn       DateTime?
+  checkOut      DateTime?
+  breakStart    DateTime?
+  breakEnd      DateTime?
+  status        AttendanceStatus @default(PENDING)
+  workHours     Decimal? @db.Decimal(5, 2)
+  overtimeHours Decimal  @default(0) @db.Decimal(5, 2)
+  location      Json?
+  deviceInfo    String?
+  ipAddress     String?
+  notes         String?
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([date])
+  @@index([status])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  ON_LEAVE
+  HOLIDAY
+  WEEKEND
+  PENDING
+}
+
+model Leave {
+  id            String   @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  type          LeaveType
+  startDate     DateTime @db.Date
+  endDate       DateTime @db.Date
+  totalDays     Decimal  @db.Decimal(5, 2)
+  reason        String
+  status        LeaveStatus @default(PENDING)
+  approvedBy    String?
+  approvedAt    DateTime?
+  rejectedBy    String?
+  rejectedAt    DateTime?
+  rejectionReason String?
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  CASUAL
+  MATERNITY
+  PATERNITY
+  UNPAID
+  COMPENSATORY
+  BEREAVEMENT
+  OTHER
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model Holiday {
+  id          String   @id @default(cuid())
+  name        String
+  date        DateTime @db.Date
+  type        HolidayType @default(PUBLIC)
+  description String?
+  recurring   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([date])
+  @@index([type])
+}
+
+enum HolidayType {
+  PUBLIC
+  COMPANY
+  OPTIONAL
+}
+
+// ============================================
+// FINANCIAL MODULE
+// ============================================
+
+model Payroll {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  period          String   // e.g., "2024-01"
+  periodStart     DateTime @db.Date
+  periodEnd       DateTime @db.Date
+  baseSalary      Decimal  @db.Decimal(15, 2)
+  allowances      Decimal  @default(0) @db.Decimal(15, 2)
+  bonuses         Decimal  @default(0) @db.Decimal(15, 2)
+  commissions     Decimal  @default(0) @db.Decimal(15, 2)
+  overtimePay     Decimal  @default(0) @db.Decimal(15, 2)
+  grossSalary     Decimal  @db.Decimal(15, 2)
+  
+  // Deductions
+  tax             Decimal  @default(0) @db.Decimal(15, 2)
+  insurance       Decimal  @default(0) @db.Decimal(15, 2)
+  retirement      Decimal  @default(0) @db.Decimal(15, 2)
+  otherDeductions Decimal  @default(0) @db.Decimal(15, 2)
+  totalDeductions Decimal  @db.Decimal(15, 2)
+  
+  netSalary       Decimal  @db.Decimal(15, 2)
+  status          PayrollStatus @default(DRAFT)
+  paymentDate     DateTime?
+  paymentMethod   PaymentMethod?
+  bankReference   String?
+  notes           String?
+  
+  createdBy       String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([employeeId, period])
+  @@index([employeeId])
+  @@index([period])
+  @@index([status])
+}
+
+enum PayrollStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PAID
+  FAILED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CHECK
+  CASH
+  DIGITAL_WALLET
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  employeeId    String?
+  category      String
+  amount        Decimal  @db.Decimal(15, 2)
+  date          DateTime @db.Date
+  description   String
+  receiptUrl    String?
+  status        ExpenseStatus @default(PENDING)
+  approvedBy    String?
+  approvedAt    DateTime?
+  rejectedBy    String?
+  rejectedAt    DateTime?
+  rejectionReason String?
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([employeeId])
+  @@index([status])
+  @@index([date])
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REIMBURSED
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  invoiceNumber String   @unique
+  type          InvoiceType
+  clientId      String?
+  clientName    String
+  clientEmail   String?
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+  issueDate     DateTime @db.Date
+  dueDate       DateTime @db.Date
+  items         Json     // Array of line items
+  subtotal      Decimal  @db.Decimal(15, 2)
+  taxRate       Decimal  @default(0) @db.Decimal(5, 2)
+  taxAmount     Decimal  @default(0) @db.Decimal(15, 2)
+  discount      Decimal  @default(0) @db.Decimal(15, 2)
+  total         Decimal  @db.Decimal(15, 2)
+  amountPaid    Decimal  @default(0) @db.Decimal(15, 2)
+  balance       Decimal  @db.Decimal(15, 2)
+  status        InvoiceStatus @default(DRAFT)
+  notes         String?
+  terms         String?
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([invoiceNumber])
+  @@index([type])
+  @@index([status])
+}
+
+enum InvoiceType {
+  SALES
+  PURCHASE
+  RECURRING
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PARTIAL
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Transaction {
+  id            String   @id @default(cuid())
+  type          TransactionType
+  category      String
+  amount        Decimal  @db.Decimal(15, 2)
+  date          DateTime @db.Date
+  description   String
+  reference     String?
+  accountId     String?
+  account       Account? @relation(fields: [accountId], references: [id])
+  invoiceId     String?
+  invoice       Invoice? @relation(fields: [invoiceId], references: [id])
+  expenseId     String?
+  expense       Expense? @relation(fields: [expenseId], references: [id])
+  status        TransactionStatus @default(COMPLETED)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([type])
+  @@index([date])
+  @@index([accountId])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Account {
+  id            String   @id @default(cuid())
+  name          String
+  code          String   @unique
+  type          AccountType
+  balance       Decimal  @default(0) @db.Decimal(15, 2)
+  currency      String   @default("USD")
+  bankName      String?
+  accountNumber String?
+  status        Status   @default(ACTIVE)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  transactions Transaction[]
+  
+  @@index([code])
+  @@index([type])
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+// ============================================
+// INVENTORY MODULE
+// ============================================
+
+model Product {
+  id            String   @id @default(cuid())
+  sku           String   @unique
+  name          String
+  description   String?
+  categoryId    String?
+  category      ProductCategory? @relation(fields: [categoryId], references: [id])
+  unit          String   @default("piece")
+  costPrice     Decimal  @db.Decimal(15, 2)
+  sellingPrice  Decimal  @db.Decimal(15, 2)
+  reorderLevel  Int      @default(0)
+  currentStock  Int      @default(0)
+  reservedStock Int      @default(0)
+  availableStock Int     @default(0)
+  warehouseId   String?
+  warehouse     Warehouse? @relation(fields: [warehouseId], references: [id])
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  images        Json?
+  attributes    Json?
+  status        Status   @default(ACTIVE)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  stockMovements StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  salesOrderItems SalesOrderItem[]
+  
+  @@index([sku])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model ProductCategory {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  parentId    String?
+  parent      ProductCategory? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    ProductCategory[] @relation("CategoryHierarchy")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  products Product[]
+  
+  @@index([code])
+}
+
+model Warehouse {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  address     Json?
+  capacity    Int?
+  managerId   String?
+  status      Status   @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  products Product[]
+  stockMovements StockMovement[]
+  
+  @@index([code])
+}
+
+model StockMovement {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+  type          StockMovementType
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  reference     String?
+  referenceType String?
+  notes         String?
+  performedBy   String?
+  createdAt     DateTime @default(now())
+  
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([type])
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  TRANSFER
+  RETURN
+  DAMAGE
+}
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  contactPerson String?
+  email       String?
+  phone       String?
+  address     Json?
+  taxId       String?
+  paymentTerms String?
+  status      Status   @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  products Product[]
+  purchaseOrders PurchaseOrder[]
+  
+  @@index([code])
+}
+
+model PurchaseOrder {
+  id            String   @id @default(cuid())
+  orderNumber   String   @unique
+  supplierId    String
+  supplier      Supplier @relation(fields: [supplierId], references: [id])
+  orderDate     DateTime @db.Date
+  expectedDate  DateTime?
+  receivedDate  DateTime?
+  status        PurchaseOrderStatus @default(DRAFT)
+  items         Json?
+  subtotal      Decimal  @db.Decimal(15, 2)
+  tax           Decimal  @default(0) @db.Decimal(15, 2)
+  shipping      Decimal  @default(0) @db.Decimal(15, 2)
+  total         Decimal  @db.Decimal(15, 2)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  purchaseOrderItems PurchaseOrderItem[]
+  
+  @@index([orderNumber])
+  @@index([supplierId])
+  @@index([status])
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model SalesOrder {
+  id            String   @id @default(cuid())
+  orderNumber   String   @unique
+  customerId    String?
+  customerName  String
+  customerEmail String?
+  orderDate     DateTime @db.Date
+  shippedDate   DateTime?
+  deliveredDate DateTime?
+  status        SalesOrderStatus @default(DRAFT)
+  items         Json?
+  subtotal      Decimal  @db.Decimal(15, 2)
+  tax           Decimal  @default(0) @db.Decimal(15, 2)
+  shipping      Decimal  @default(0) @db.Decimal(15, 2)
+  total         Decimal  @db.Decimal(15, 2)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  salesOrderItems SalesOrderItem[]
+  
+  @@index([orderNumber])
+  @@index([status])
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model PurchaseOrderItem {
+  id            String   @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitPrice     Decimal  @db.Decimal(15, 2)
+  total         Decimal  @db.Decimal(15, 2)
+  received      Int      @default(0)
+  createdAt     DateTime @default(now())
+  
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model SalesOrderItem {
+  id            String   @id @default(cuid())
+  salesOrderId  String
+  salesOrder    SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitPrice     Decimal  @db.Decimal(15, 2)
+  total         Decimal  @db.Decimal(15, 2)
+  shipped       Int      @default(0)
+  createdAt     DateTime @default(now())
+  
+  @@index([salesOrderId])
+  @@index([productId])
+}
+
+// ============================================
+// PROJECT & TASK MODULE
+// ============================================
+
+model Project {
+  id            String   @id @default(cuid())
+  name          String
+  code          String   @unique
+  description   String?
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+  managerId     String?
+  manager       User     @relation("ProjectManager", fields: [managerId], references: [id])
+  clientId      String?
+  clientName    String?
+  startDate     DateTime?
+  endDate       DateTime?
+  deadline      DateTime?
+  status        ProjectStatus @default(PLANNING)
+  priority      Priority @default(MEDIUM)
+  budget        Decimal  @default(0) @db.Decimal(15, 2)
+  spent         Decimal  @default(0) @db.Decimal(15, 2)
+  progress      Int      @default(0)
+  teamMembers   Json?
+  tags          Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  tasks         Task[]
+  expenses      Expense[]
+  invoices      Invoice[]
+  
+  @@index([code])
+  @@index([status])
+  @@index([managerId])
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+  assigneeId    String?
+  assignee      User     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdById   String
+  creator       User     @relation("TaskCreator", fields: [createdById], references: [id])
+  parentId      String?
+  parent        Task?    @relation("TaskHierarchy", fields: [parentId], references: [id])
+  subtasks      Task[]   @relation("TaskHierarchy")
+  status        TaskStatus @default(TODO)
+  priority      Priority @default(MEDIUM)
+  dueDate       DateTime?
+  startDate     DateTime?
+  completedDate DateTime?
+  estimatedHours Decimal? @db.Decimal(5, 2)
+  actualHours   Decimal? @db.Decimal(5, 2)
+  progress      Int      @default(0)
+  tags          Json?
+  attachments   Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([projectId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  BLOCKED
+  DONE
+}
+
+// ============================================
+// PERFORMANCE & REVIEWS
+// ============================================
+
+model PerformanceReview {
+  id            String   @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  reviewerId    String
+  reviewPeriod  String
+  startDate     DateTime @db.Date
+  endDate       DateTime @db.Date
+  overallRating Decimal  @db.Decimal(3, 2)
+  strengths     String?
+  weaknesses    String?
+  goals         Json?
+  comments      String?
+  status        ReviewStatus @default(DRAFT)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([employeeId])
+  @@index([reviewPeriod])
+}
+
+enum ReviewStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+}
+
+// ============================================
+// NOTIFICATIONS & AUDIT
+// ============================================
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String
+  title       String
+  message     String
+  data        Json?
+  read        Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([read])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  action      String
+  entity      String
+  entityId    String?
+  changes     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+}
+
+model Approval {
+  id          String   @id @default(cuid())
+  type        String
+  entityType  String
+  entityId    String
+  requesterId String
+  approverId  String
+  approver    User     @relation(fields: [approverId], references: [id])
+  status      ApprovalStatus @default(PENDING)
+  comments    String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([entityType, entityId])
+  @@index([approverId])
+  @@index([status])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ============================================
+// SETTINGS & CONFIGURATION
+// ============================================
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  category  String?
+  isPublic  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+  
+  @@index([category])
+}
+
+model WorkSchedule {
+  id          String   @id @default(cuid())
+  name        String
+  monday      WorkDay?
+  tuesday     WorkDay?
+  wednesday   WorkDay?
+  thursday    WorkDay?
+  friday      WorkDay?
+  saturday    WorkDay?
+  sunday      WorkDay?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum WorkDay {
+  FULL_DAY
+  HALF_DAY
+  OFF
+}
